@@ -1,0 +1,7 @@
+.env
+anc-fleet-key.json
+anc-fleet-key-gbpilot.json
+anc-fleet-key-david.json
+__pycache__/
+*.pyc
+venv/
