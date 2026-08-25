@@ -6,13 +6,34 @@ judging feedback: a judge must be able to see real job history with
 timestamps proving end-to-end execution, not a diagram claiming it happened.
 
 Every call here writes an immutable record. Nothing is overwritten or
-mocked for the demo — the same log path runs in dev and in the real
-Cloud Run job.
+mocked for the demo -- the same log path runs in dev and in the real
+deployed service.
+
+Auth: supports two modes, so the same code works locally and on Render.
+1. Local dev: GOOGLE_APPLICATION_CREDENTIALS pointing to a key file, or
+   `gcloud auth application-default login` credentials.
+2. Render (or any host without a local file system for secrets):
+   GOOGLE_APPLICATION_CREDENTIALS_JSON containing the full key JSON as a
+   string. On import, this gets written to a temp file and
+   GOOGLE_APPLICATION_CREDENTIALS is set to point at it, so the underlying
+   Firestore client picks it up the normal way.
 """
 
 import os
+import json
+import tempfile
 import uuid
 from datetime import datetime, timezone
+
+# --- Handle Render-style inline JSON credentials before importing firestore ---
+_inline_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if _inline_creds and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+    _tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    )
+    _tmp.write(_inline_creds)
+    _tmp.close()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _tmp.name
 
 from google.cloud import firestore
 
@@ -46,8 +67,8 @@ def start_run(run_type: str) -> str:
 def log_stage(run_id: str, stage: str, detail: dict) -> None:
     """Append a timestamped stage event to a run.
 
-    stage: one of "scan", "score", "decide", "act"
-    detail: arbitrary JSON-serializable dict — counts, patient_ids, outputs, etc.
+    stage: one of "scan", "score", "decide", "act", "brief"
+    detail: arbitrary JSON-serializable dict -- counts, patient_ids, outputs, etc.
     """
     _client().collection(RUNS_COLLECTION).document(run_id).collection("stages").add({
         "stage": stage,
@@ -73,7 +94,7 @@ def fail_run(run_id: str, error: str) -> None:
 
 
 def was_already_actioned(patient_id: str, action_type: str) -> bool:
-    """Prevents re-flagging / duplicate outreach across runs — this is what
+    """Prevents re-flagging / duplicate outreach across runs -- this is what
     makes the pipeline stateful across weeks rather than a stateless one-shot."""
     doc = _client().collection(PATIENT_MEMORY_COLLECTION).document(patient_id).get()
     if not doc.exists:

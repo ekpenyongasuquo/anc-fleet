@@ -36,7 +36,7 @@ logger = logging.getLogger("anc_fleet")
 app = Flask(__name__)
 
 BATCH_SIZE = 50
-MAX_BATCHES = 20  # safety cap for a single job invocation
+MAX_BATCHES = 2  # safety cap for a single job invocation
 
 
 def run_pipeline() -> dict:
