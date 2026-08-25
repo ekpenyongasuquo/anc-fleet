@@ -1,33 +1,29 @@
 """
-ANC Fleet — Cloud Run entrypoint.
+ANC Fleet — Cloud Run / Render entrypoint.
 
-Triggered by Cloud Scheduler (async, background job — not a chat request).
-Runs the Scanner -> Risk -> Action pipeline end to end, batch by batch,
-writing a timestamped Firestore audit record at every stage. This is the
-proof-of-execution artifact judges can click into: real job history, not
-a diagram claiming the pipeline works.
+Triggered by Cloud Scheduler or a manual POST (async, background job -- not
+a chat request). Runs the Scanner -> Risk -> Action pipeline end to end,
+batch by batch, writing a timestamped Firestore audit record at every stage.
+
+IMPORTANT: GET / is a lightweight health check ONLY. It does NOT run the
+pipeline. This matters because Render (and Cloud Run) periodically send GET
+requests to check the service is alive -- if those pings triggered the full
+pipeline, they would silently burn through the Gemini API quota with no
+one intentionally requesting a run. Only POST / triggers the real pipeline.
 
 Local run:      python main.py
-Cloud Run:      triggered via HTTP by Cloud Scheduler (see Dockerfile / README)
+Cloud Run/Render: triggered via HTTP POST by Cloud Scheduler or manual curl
 """
 
 import logging
 
-from dotenv import load_dotenv
-load_dotenv()
-
 from flask import Flask, jsonify
 
-from google.adk.agents import SequentialAgent
-from google.adk.runners import InMemoryRunner
-
-from agents.scanner_agent import scanner_agent
-from agents.risk_agent import risk_agent
-from agents.action_agent import action_agent
+from agents.scanner_agent import scanner_agent  # noqa: F401 (kept for interactive/dev use via `adk web`)
+from agents.risk_agent import risk_agent, score_patient_batch  # noqa: F401
+from agents.action_agent import action_agent, process_flagged_patients  # noqa: F401
 from tools.firestore_logger import start_run, log_stage, complete_run, fail_run
 from tools.cliniqbridge_tool import fetch_anc_observations
-from agents.risk_agent import score_patient_batch
-from agents.action_agent import process_flagged_patients
 from tools.gemini_brief import generate_batch_brief
 
 logging.basicConfig(level=logging.INFO)
@@ -36,11 +32,12 @@ logger = logging.getLogger("anc_fleet")
 app = Flask(__name__)
 
 BATCH_SIZE = 50
-MAX_BATCHES = 2  # safety cap for a single job invocation
+MAX_BATCHES = 20  # safety cap for a single job invocation; lower this (e.g. 2) for fast local testing
 
 
 def run_pipeline() -> dict:
-    """Runs the full Scanner -> Risk -> Action pipeline across all batches.
+    """Runs the full Scanner -> Risk -> Action pipeline across all batches,
+    then generates a plain-language Gemini brief summarizing the run.
 
     Note: agent orchestration here calls the underlying tool functions
     directly in a deterministic loop (rather than relying on LLM-driven
@@ -104,10 +101,10 @@ def run_pipeline() -> dict:
                 break
             offset += BATCH_SIZE
 
-        # Real Gemini call via Vertex AI -- turns the run's results into a
-        # plain-language brief. This is the step that actually satisfies the
-        # hackathon's Gemini requirement; everything upstream is deterministic
-        # scoring logic by design, for auditability.
+        # Real Gemini call -- turns the run's results into a plain-language
+        # brief. This is the step that satisfies the hackathon's Gemini
+        # requirement; everything upstream is deterministic scoring logic
+        # by design, for auditability.
         gemini_brief = generate_batch_brief(
             tier_counts=total_tier_counts,
             sample_flagged=all_flagged_examples,
@@ -133,9 +130,19 @@ def run_pipeline() -> dict:
         raise
 
 
-@app.route("/", methods=["POST", "GET"])
+@app.route("/", methods=["GET"])
+def health():
+    """Lightweight health check -- does NOT trigger the pipeline.
+    Render/Cloud Run hit this automatically to confirm the service is
+    alive. Keeping it cheap prevents health pings from silently burning
+    Gemini/Firestore quota."""
+    return jsonify({"status": "healthy"}), 200
+
+
+@app.route("/", methods=["POST"])
 def trigger():
-    """HTTP entrypoint for Cloud Scheduler / Cloud Run job trigger."""
+    """Real pipeline trigger -- only fires on POST (Cloud Scheduler,
+    or a manual `curl -X POST`)."""
     try:
         summary = run_pipeline()
         return jsonify({"status": "ok", "summary": summary}), 200
