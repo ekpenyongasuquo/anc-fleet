@@ -130,13 +130,6 @@ def run_pipeline() -> dict:
         raise
 
 
-@app.route("/", methods=["GET"])
-def health():
-    """Lightweight health check -- does NOT trigger the pipeline.
-    Render/Cloud Run hit this automatically to confirm the service is
-    alive. Keeping it cheap prevents health pings from silently burning
-    Gemini/Firestore quota."""
-    return jsonify({"status": "healthy"}), 200
 @app.route("/debug-key", methods=["GET"])
 def debug_key():
     """TEMPORARY diagnostic -- shows only the last 4 chars of the loaded
