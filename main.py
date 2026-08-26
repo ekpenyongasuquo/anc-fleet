@@ -137,6 +137,14 @@ def health():
     alive. Keeping it cheap prevents health pings from silently burning
     Gemini/Firestore quota."""
     return jsonify({"status": "healthy"}), 200
+@app.route("/debug-key", methods=["GET"])
+def debug_key():
+    """TEMPORARY diagnostic -- shows only the last 4 chars of the loaded
+    Gemini key, to confirm which key Render is actually running with.
+    Remove this route before final submission."""
+    import os
+    key = os.environ.get("GEMINI_API_KEY", "")
+    return jsonify({"key_last_4": key[-4:] if key else "NOT SET", "key_length": len(key)}), 200
 
 
 @app.route("/", methods=["POST"])
