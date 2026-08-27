@@ -31,6 +31,26 @@ one patient at a time.
 Full citations and the scoring rationale are in `scoring/ndhs_weights.py` (module
 docstring) and `ANC_FLEET_SPEC.md`.
 
+## Implementation notes (read before judging)
+
+- **Gemini access**: originally built against Vertex AI, but switched to
+  the direct Gemini API (Google AI Studio key) after discovering Vertex AI's
+  billing verification requires a one-time payment that Google's regional
+  fraud-prevention system was blocking on the developer's Nigerian account,
+  even for free-tier usage. The direct API path has no such requirement and
+  is fully functional -- see the live deployment for proof.
+- **Scheduling**: the architecture diagram shows Cloud Scheduler as the
+  intended async trigger. In this submission, the pipeline is triggered
+  manually via `curl -X POST` against the deployed endpoint, since Cloud
+  Scheduler (like Cloud Run) also required the same blocked billing
+  verification. The code is already async-job-shaped -- it processes a full
+  batch in one call with no user interaction mid-run -- so wiring in Cloud
+  Scheduler once billing is available is a config change, not a rewrite.
+- **Hosting**: deployed to Render rather than Cloud Run, for the same
+  billing-verification reason. Firestore (real Google Cloud infrastructure)
+  and Gemini (Google's model) both run live and are provably working --
+  see the demo video for Firestore console proof and a live triggered run.
+  
 ## Data note
 
 Real facility-level UCTH patient data requires institutional ethics approval, which
